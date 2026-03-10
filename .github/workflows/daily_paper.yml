@@ -1,0 +1,43 @@
+name: Daily Paper Tracking
+
+on:
+  schedule:
+    # 每天北京时间 8:00（UTC 0:00）
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+    # 支持手动触发，方便调试
+
+jobs:
+  fetch-and-push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run daily paper tracking
+        env:
+          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+          WECOM_WEBHOOK_URL: ${{ secrets.WECOM_WEBHOOK_URL }}
+          PAPER_KEYWORDS: ${{ vars.PAPER_KEYWORDS || 'LLM,Agent,Memory,RAG,Tool Use,Function Calling,Planning,Reasoning,Multi-Agent,Autonomous' }}
+          TOP_K_PAPERS: ${{ vars.TOP_K_PAPERS || '10' }}
+          MAX_PAPERS_PER_SOURCE: ${{ vars.MAX_PAPERS_PER_SOURCE || '30' }}
+        run: python run_daily.py
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: daily-report-${{ github.run_id }}
+          path: output/
+          retention-days: 30
