@@ -11,13 +11,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from config import (
     MAX_PAPERS_PER_SOURCE,
     OUTPUT_DIR,
+    OUTPUT_MODE,
     PAPER_KEYWORDS,
     TOP_K_PAPERS,
     WECOM_WEBHOOK_URL,
 )
-from formatter import format_daily_report, format_wecom_messages, save_report
+from formatter import (
+    format_daily_report, 
+    format_detailed_report, 
+    format_wecom_messages, 
+    save_report, 
+    save_detailed_report
+)
 from sources import fetch_huggingface_trending_papers, fetch_arxiv_recent_papers
-from summarizer import select_top_papers, enrich_papers
+from summarizer import select_top_papers, enrich_papers, detailed_analysis
 from wecom import send_markdown_messages
 
 logging.basicConfig(
@@ -69,21 +76,36 @@ def run(output_format: str = "markdown", save_to_file: bool = True) -> str:
     # ── 3. LLM 丰富每篇信息（机构 / 关键词 / 一句话总结）──
     enriched = enrich_papers(selected)
 
-    # ── 4. 格式化 ──
-    report = format_daily_report(enriched, output_format=output_format)
+    # ── 4. LLM 详细分析（背景、动机、创新点、技术难点、不足、展望）──
+    analyzed = detailed_analysis(enriched)
 
-    # 保存完整版
+    # ── 5. 格式化 ──
+    simple_report = format_daily_report(analyzed, output_format=output_format)
+    
+    # 根据输出模式决定是否生成详细报告
+    detailed_report = None
+    if OUTPUT_MODE in ["detailed", "both"]:
+        detailed_report = format_detailed_report(analyzed, output_format=output_format)
+
+    # 保存文件
     if save_to_file:
-        path = save_report(report, OUTPUT_DIR)
-        logger.info("报告已保存: %s", path)
+        simple_path = save_report(simple_report, OUTPUT_DIR, "simple")
+        logger.info("简单报告已保存: %s", simple_path)
+        
+        if detailed_report:
+            detailed_path = save_detailed_report(detailed_report, OUTPUT_DIR, "detailed")
+            logger.info("详细报告已保存: %s", detailed_path)
 
-    # ── 5. 企业微信推送 ──
-    if WECOM_WEBHOOK_URL and enriched:
-        messages = format_wecom_messages(enriched)
+    # ── 6. 企业微信推送 ──
+    if WECOM_WEBHOOK_URL and analyzed:
+        messages = format_wecom_messages(analyzed, OUTPUT_MODE)
         logger.info("企业微信共 %d 条消息待推送", len(messages))
         send_markdown_messages(WECOM_WEBHOOK_URL, messages)
 
-    return report
+    # 返回主要报告
+    if OUTPUT_MODE == "detailed" and detailed_report:
+        return detailed_report
+    return simple_report
 
 
 if __name__ == "__main__":

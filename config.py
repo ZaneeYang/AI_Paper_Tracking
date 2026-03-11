@@ -42,6 +42,9 @@ USER_PROFILE = os.getenv(
     "或有实际落地验证的论文，重视实践价值和可复现性。",
 )
 
+# ── 输出模式 ──
+OUTPUT_MODE = os.getenv("OUTPUT_MODE", "both")  # simple:简单, detailed:详细, both:两者都输出
+
 # ── 输出 ──
 OUTPUT_DIR = Path(os.getenv("OUTPUT_DIR", Path(__file__).parent / "output"))
 

@@ -2,6 +2,7 @@
 大模型驱动的论文处理流水线：
 1. select_top_papers()  —— 从候选中精选 TOP K
 2. enrich_papers()      —— 为每篇提取机构、关键词、一句话总结
+3. detailed_analysis()  —— 详细分析每篇论文（背景、动机、创新点、技术难点、不足、展望）
 """
 import json
 import logging
@@ -206,3 +207,130 @@ def _guess_institution(p: Paper) -> str:
     # 简单启发式：取第一作者姓氏
     first = p.authors.split(",")[0].strip()
     return first.split()[-1] if first else "Unknown"
+
+
+# ─────────────────── 3. 详细分析每篇论文 ───────────────────
+
+
+def detailed_analysis(papers: List[Paper]) -> List[Paper]:
+    """
+    为每篇论文生成详细分析，包括：
+    - 背景
+    - 动机  
+    - 创新点
+    - 技术难点
+    - 不足/待解决
+    - 展望/应用
+    
+    若 LLM 调用失败，返回空分析。
+    """
+    result = _get_client()
+    if result is None:
+        logger.warning("未配置 API Key，跳过详细分析")
+        for p in papers:
+            p.detailed_analysis = {
+                "background": "未进行分析",
+                "motivation": "未进行分析",
+                "innovation": "未进行分析",
+                "challenge": "未进行分析",
+                "limitation": "未进行分析",
+                "future": "未进行分析"
+            }
+        return papers
+
+    client, model = result
+
+    papers_input = []
+    for i, p in enumerate(papers):
+        papers_input.append(
+            f"[{i}]\n标题: {p.title}\n作者: {p.authors or '未知'}\n机构: {p.institution or '未知'}\n摘要: {p.summary}"
+        )
+
+    prompt = f"""以下是 {len(papers)} 篇精选 AI 论文。请为每篇论文生成详细分析，包含以下6个维度：
+
+1. **背景** (Background): 该研究领域的基本情况、现有方法的主要问题
+2. **动机** (Motivation): 作者为什么要做这项研究？解决了什么痛点？
+3. **创新点** (Innovation): 本文的核心创新是什么？方法上有何独特之处？
+4. **技术难点** (Technical Challenges): 实现该方法的主要技术挑战是什么？
+5. **不足/待解决** (Limitations): 论文中提到的局限性或未来需要解决的问题
+6. **展望/应用** (Future/Applications): 该研究的未来发展方向和潜在应用场景
+
+要求：
+- 每个维度用1-2句话简明扼要说明
+- 语言为中文，专业但易懂
+- 基于论文内容进行合理推断
+
+请返回一个 JSON 数组，每个元素包含 index 和6个分析字段：
+[
+  {{
+    "index": 0,
+    "background": "...",
+    "motivation": "...", 
+    "innovation": "...",
+    "challenge": "...",
+    "limitation": "...",
+    "future": "..."
+  }},
+  ...
+]
+只返回 JSON，不要输出其他内容。
+
+论文列表：
+{chr(10).join(papers_input)}
+"""
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "你是 AI 论文分析专家，请为每篇论文提供详细分析，只输出 JSON。"},
+                {"role": "user", "content": prompt},
+            ],
+            max_tokens=4000,
+        )
+        raw = (response.choices[0].message.content or "").strip()
+        # 提取 JSON 数组
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start != -1 and end != -1:
+            arr = json.loads(raw[start:end + 1])
+            analysis_map = {}
+            for item in arr:
+                if isinstance(item, dict) and "index" in item:
+                    analysis_map[item["index"]] = {
+                        "background": item.get("background", "未提供"),
+                        "motivation": item.get("motivation", "未提供"),
+                        "innovation": item.get("innovation", "未提供"),
+                        "challenge": item.get("challenge", "未提供"),
+                        "limitation": item.get("limitation", "未提供"),
+                        "future": item.get("future", "未提供")
+                    }
+
+            for i, p in enumerate(papers):
+                p.detailed_analysis = analysis_map.get(i, {
+                    "background": "分析失败",
+                    "motivation": "分析失败",
+                    "innovation": "分析失败",
+                    "challenge": "分析失败",
+                    "limitation": "分析失败",
+                    "future": "分析失败"
+                })
+
+            logger.info("LLM 成功完成 %d 篇论文详细分析", len(papers))
+            return papers
+
+        logger.warning("LLM detailed_analysis 返回格式异常，跳过详细分析")
+    except Exception as e:
+        logger.warning("LLM detailed_analysis 调用失败: %s，跳过详细分析", e)
+
+    # 失败时的兜底
+    for p in papers:
+        p.detailed_analysis = {
+            "background": "分析失败",
+            "motivation": "分析失败",
+            "innovation": "分析失败",
+            "challenge": "分析失败",
+            "limitation": "分析失败",
+            "future": "分析失败"
+        }
+    return papers

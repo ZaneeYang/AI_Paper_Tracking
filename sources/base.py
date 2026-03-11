@@ -17,6 +17,7 @@ class Paper:
     institution: Optional[str] = None
     keywords_tags: Optional[str] = None
     one_line_summary: Optional[str] = None
+    detailed_analysis: Optional[dict] = None  # 详细分析：背景、动机、创新点、技术难点、不足、展望
     extra: dict = field(default_factory=dict)
 
     def to_text(self) -> str:
